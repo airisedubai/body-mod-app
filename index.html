@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Body Modification Simulator</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- TensorFlow.js and TFLite support -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.10/dist/tf-tflite.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Body Modification Simulator</h1>
+        
+        <!-- File Upload -->
+        <div class="upload-section">
+            <input type="file" id="imageUpload" accept="image/jpeg, image/png">
+            <button id="runButton" disabled>Run Simulation</button>
+        </div>
+        
+        <!-- Image Display Area -->
+        <div class="image-area">
+            <div class="input-box">
+                <h3>Input Photo</h3>
+                <img id="inputImage" alt="Upload a photo first">
+                <canvas id="inputCanvas" style="display: none;"></canvas>
+            </div>
+            
+            <div class="output-box">
+                <h3>Simulated Result</h3>
+                <canvas id="outputCanvas" width="256" height="256"></canvas>
+                <button id="downloadButton" style="display: none;">Download Result</button>
+            </div>
+        </div>
+        
+        <!-- Status -->
+        <div id="status">Upload an image to begin</div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
