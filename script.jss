@@ -1,5 +1,5 @@
 // Global variables
-let tfliteModel = null;
+let net = null;
 let isModelLoaded = false;
 const statusEl = document.getElementById('status');
 const runButton = document.getElementById('runButton');
@@ -9,14 +9,22 @@ const inputImage = document.getElementById('inputImage');
 const inputCanvas = document.getElementById('inputCanvas');
 const outputCanvas = document.getElementById('outputCanvas');
 
-// Load the TFLite model when page loads
+// Effect controls (add these to your HTML if you want options)
+let currentEffect = 'blur'; // Options: 'blur', 'green', 'bw', 'pixelate'
+
+// Load the BodyPix model when page loads
 async function loadModel() {
     try {
-        statusEl.textContent = 'Loading model...';
+        statusEl.textContent = 'Loading BodyPix model... (this may take 15-30 seconds first time)';
         statusEl.className = 'loading';
         
-        // Load the TFLite model from the same directory
-        tfliteModel = await tflite.loadTFLiteModel('body_mod_model.tflite');
+        // Load the pre-trained BodyPix model
+        net = await bodyPix.load({
+            architecture: 'MobileNetV1',
+            outputStride: 16,
+            multiplier: 0.75,
+            quantBytes: 2
+        });
         
         isModelLoaded = true;
         statusEl.textContent = 'Model loaded! Upload an image to begin.';
@@ -51,26 +59,114 @@ imageUpload.addEventListener('change', function(e) {
     reader.readAsDataURL(file);
 });
 
-// Preprocess image exactly like your Python code
-async function preprocessImage(imgElement) {
-    return tf.tidy(() => {
-        // Draw image to canvas for pixel extraction
-        const canvas = inputCanvas;
-        const ctx = canvas.getContext('2d');
+// Apply body modification effect
+async function applyEffect(segmentation, originalImage) {
+    const canvas = outputCanvas;
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size to match original image
+    canvas.width = originalImage.width;
+    canvas.height = originalImage.height;
+    
+    // Draw original image
+    ctx.drawImage(originalImage, 0, 0);
+    
+    // Get image data for pixel manipulation
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Apply effect based on segmentation mask
+    for (let i = 0; i < data.length; i += 4) {
+        const pixelIndex = i / 4;
+        const x = pixelIndex % canvas.width;
+        const y = Math.floor(pixelIndex / canvas.width);
         
-        // Resize canvas to 256x256 (like PIL resize)
-        canvas.width = 256;
-        canvas.height = 256;
-        ctx.drawImage(imgElement, 0, 0, 256, 256);
+        // Check if this pixel is part of a person (value > 0)
+        const isPerson = segmentation.data[pixelIndex] > 0;
         
-        // Convert to tensor, normalize to [0,1], and add batch dimension
-        const tensor = tf.browser.fromPixels(canvas)
-            .expandDims(0)           // Add batch dimension
-            .toFloat()
-            .div(255.0);            // Normalize like your /255.0
-        
-        return tensor;
-    });
+        if (!isPerson) {
+            // Apply effect to background (non-person pixels)
+            switch(currentEffect) {
+                case 'blur':
+                    // Blur effect is applied separately
+                    break;
+                case 'green':
+                    // Replace background with green
+                    data[i] = 0;       // Red
+                    data[i+1] = 255;    // Green
+                    data[i+2] = 0;      // Blue
+                    break;
+                case 'bw':
+                    // Make background black and white
+                    const gray = (data[i] + data[i+1] + data[i+2]) / 3;
+                    data[i] = gray;
+                    data[i+1] = gray;
+                    data[i+2] = gray;
+                    break;
+                case 'pixelate':
+                    // Pixelate effect applied separately
+                    break;
+            }
+        }
+    }
+    
+    if (currentEffect === 'green' || currentEffect === 'bw') {
+        ctx.putImageData(imageData, 0, 0);
+    } else if (currentEffect === 'blur') {
+        // Use BodyPix's built-in blur function
+        await bodyPix.drawMask(
+            canvas, originalImage, segmentation,
+            { maskOpacity: 0, backgroundBlurAmount: 15 }
+        );
+    } else if (currentEffect === 'pixelate') {
+        // Pixelate background
+        pixelateBackground(ctx, segmentation, 10);
+    }
+}
+
+// Helper function to pixelate background
+function pixelateBackground(ctx, segmentation, pixelSize) {
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    const imageData = ctx.getImageData(0, 0, width, height);
+    
+    for (let y = 0; y < height; y += pixelSize) {
+        for (let x = 0; x < width; x += pixelSize) {
+            // Check if this block is in background
+            const pixelIndex = (y * width + x) * 4;
+            const isPerson = segmentation.data[y * width + x] > 0;
+            
+            if (!isPerson) {
+                // Get average color of this block
+                let r = 0, g = 0, b = 0, count = 0;
+                for (let dy = 0; dy < pixelSize && y + dy < height; dy++) {
+                    for (let dx = 0; dx < pixelSize && x + dx < width; dx++) {
+                        const idx = ((y + dy) * width + (x + dx)) * 4;
+                        r += imageData.data[idx];
+                        g += imageData.data[idx + 1];
+                        b += imageData.data[idx + 2];
+                        count++;
+                    }
+                }
+                
+                // Fill block with average color
+                r = Math.floor(r / count);
+                g = Math.floor(g / count);
+                b = Math.floor(b / count);
+                
+                for (let dy = 0; dy < pixelSize && y + dy < height; dy++) {
+                    for (let dx = 0; dx < pixelSize && x + dx < width; dx++) {
+                        const idx = ((y + dy) * width + (x + dx)) * 4;
+                        imageData.data[idx] = r;
+                        imageData.data[idx + 1] = g;
+                        imageData.data[idx + 2] = b;
+                    }
+                }
+            }
+        }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
 }
 
 // Run inference when button clicked
@@ -86,29 +182,17 @@ runButton.addEventListener('click', async function() {
         runButton.disabled = true;
         downloadButton.style.display = 'none';
         
-        // Preprocess the image
-        const inputTensor = await preprocessImage(inputImage);
-        
-        // Run inference (equivalent to interpreter.invoke())
-        const outputTensor = tfliteModel.predict(inputTensor);
-        
-        // Post-process like your Python code: squeeze * 255.0 -> uint8
-        const outputData = await tf.tidy(() => {
-            return outputTensor
-                .squeeze()           // Remove batch dimension
-                .mul(255.0)          // Scale to 0-255
-                .clipByValue(0, 255) // Ensure valid range
-                .toInt();            // Convert to uint8 equivalent
+        // Segment the person from the image
+        const segmentation = await net.segmentPerson(inputImage, {
+            internalResolution: 'medium',
+            segmentationThreshold: 0.7
         });
         
-        // Display on canvas
-        await tf.browser.toPixels(outputData, outputCanvas);
+        // Apply the selected effect
+        await applyEffect(segmentation, inputImage);
         
         // Enable download
         downloadButton.style.display = 'inline-block';
-        
-        // Clean up tensors
-        tf.dispose([inputTensor, outputTensor, outputData]);
         
         statusEl.textContent = 'Simulation complete!';
         statusEl.className = 'success';
@@ -125,7 +209,7 @@ runButton.addEventListener('click', async function() {
 // Download the result image
 downloadButton.addEventListener('click', function() {
     const link = document.createElement('a');
-    link.download = 'simulated_result.jpg';
+    link.download = 'body_mod_result.jpg';
     link.href = outputCanvas.toDataURL('image/jpeg', 0.9);
     link.click();
     
