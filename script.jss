@@ -215,6 +215,12 @@ downloadButton.addEventListener('click', function() {
     
     statusEl.textContent = 'Result downloaded!';
 });
-
+// Add this after the variable declarations
+const effectSelect = document.getElementById('effectSelect');
+if (effectSelect) {
+    effectSelect.addEventListener('change', function(e) {
+        currentEffect = e.target.value;
+    });
+}
 // Load model on page start
 loadModel();
