@@ -19,5 +19,15 @@ A web-based body modification simulator that uses TensorFlow.js and BodyPix to s
 - BodyPix Model
 - HTML5 Canvas
 
+## Local Development
+Serve the directory with any static HTTP server:
+```
+python -m http.server 8000
+```
+Then open `http://localhost:8000` in a browser.
+
+## Deployment
+Deployed to GitHub Pages via GitHub Actions. Push to `main` triggers automatic deployment.
+
 ## Live Demo
 Visit: https://airisedubai.github.io/body-mod-app/
